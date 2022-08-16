@@ -124,6 +124,33 @@ impl NovelReader {
     }
 }
 
+async fn handle_one_novel(
+    client: &reqwest::Client,
+    mut novel_list: Vec<String>,
+    semap: Arc<tokio::sync::Semaphore>,
+) -> anyhow::Result<()> {
+    let novel_name = novel_list
+        .pop()
+        .ok_or(anyhow::anyhow!("invalid novel name"))?;
+
+    let mut novel_file = tokio::fs::File::create(format!("./{}.txt", novel_name)).await?;
+
+    for novel_url in novel_list {
+        let sema = semap.acquire().await?;
+        log::info!("downloading: {}", novel_url);
+        // NOTE: here we use semaphore to limit the amount we send http requests at the same time.
+        // Beside, we also use sleep to "hold on" for a while.
+        let novel_content = get_novel(client, &novel_url).await?;
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        drop(sema);
+
+        novel_file.write_all("\n\n".as_bytes()).await?;
+        novel_content.dump_to_file(&mut novel_file).await?;
+    }
+    log::info!("novel: {} has done", novel_name);
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::new()
@@ -161,22 +188,29 @@ async fn main() -> anyhow::Result<()> {
     let file = tokio::fs::File::open("./novel_list.txt").await?;
     let mut reader = NovelReader::new(file);
 
-    while let Some(mut novel_list) = reader.next_novel().await? {
-        let novel_name = novel_list
-            .pop()
-            .ok_or(anyhow::anyhow!("invalid novel name"))?;
+    let semaphone = Arc::new(tokio::sync::Semaphore::new(3));
 
-        let mut novel_file = tokio::fs::File::create(format!("./{}.txt", novel_name)).await?;
+    let mut all_task = vec![];
 
-        for novel_url in novel_list {
-            log::info!("handling: {}", novel_url);
-            let novel_content = get_novel(&client, &novel_url).await?;
+    while let Some(novel_list) = reader.next_novel().await? {
+        // let sema = Arc::clone(&semaphone).acquire_owned().await?;
+        let semap = Arc::clone(&semaphone);
+        let in_client = Arc::clone(&client);
 
-            novel_file.write_all("\n\n".as_bytes()).await?;
-            novel_content.dump_to_file(&mut novel_file).await?;
-        }
+        log::info!("start to handle a novel: {:#?}", novel_list.last());
+        let handle = tokio::spawn(async move {
+            // let _sema = sema;
+            handle_one_novel(&in_client, novel_list, semap).await
+        });
+        all_task.push(handle);
     }
 
+
+    // let _sema = semaphone.acquire_many(3).await?;
+    for handle in all_task {
+        handle.await??;
+    }
+    
     log::info!("all done");
     Ok(())
 }
