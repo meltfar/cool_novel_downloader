@@ -3,16 +3,18 @@ use std::{io::Write, sync::Arc};
 use async_trait::async_trait;
 use kuchiki::traits::TendrilSink;
 use reqwest::header::HeaderMap;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
 #[async_trait]
 trait FileSink {
-    async fn dump_to_file(&self) -> anyhow::Result<()>;
+    async fn dump(&self) -> anyhow::Result<()>;
+    async fn dump_to_file(&self, file: &mut tokio::fs::File) -> anyhow::Result<()>;
 }
 
 #[async_trait]
 impl FileSink for String {
-    async fn dump_to_file(&self) -> anyhow::Result<()> {
+    // dump to file, parse filename from html content
+    async fn dump(&self) -> anyhow::Result<()> {
         let self = self.trim();
         let first_line = self
             .split("\n")
@@ -29,6 +31,11 @@ impl FileSink for String {
         let mut file = tokio::fs::File::create(format!("./{}.txt", first_line)).await?;
         file.write_all(self.as_bytes()).await?;
         Ok(())
+    }
+
+    // dump to file, use given file descriptor
+    async fn dump_to_file(&self, file: &mut tokio::fs::File) -> anyhow::Result<()> {
+        file.write_all(self.as_bytes()).await.map_err(|e| e.into())
     }
 }
 
@@ -60,20 +67,61 @@ async fn get_novel(client: &reqwest::Client, url: &str) -> anyhow::Result<String
     Ok(ret)
 }
 
-async fn dest_novel_list() -> anyhow::Result<Vec<String>> {
-    let mut list = tokio::fs::File::open("./novel_list.txt").await?;
-    let mut buffer = String::new();
-    list.read_to_string(&mut buffer).await?;
-    Ok(buffer
-        .split("\n")
-        .filter_map(|f| {
-            if f.trim().len() <= 0 || f.starts_with("//") {
-                None
-            } else {
-                Some(f.trim().to_string())
+struct NovelReader {
+    reader: tokio::io::Lines<tokio::io::BufReader<tokio::fs::File>>,
+}
+
+impl NovelReader {
+    fn new(file: tokio::fs::File) -> Self {
+        let reader = tokio::io::BufReader::new(file);
+        NovelReader {
+            reader: reader.lines(),
+        }
+    }
+
+    async fn next_novel(&mut self) -> anyhow::Result<Option<Vec<String>>> {
+        let mut output: Vec<String> = Vec::new();
+        let reader = &mut self.reader;
+
+        let mut novel_name = chrono::Local::now()
+            .format("%Y-%m-%d %H:%M:%S.%3f")
+            .to_string();
+
+        while let Some(line) = reader.next_line().await? {
+            let trimmed_line = line.trim();
+            // ignore empty lines and comments
+            if trimmed_line.starts_with("//") || trimmed_line.len() <= 0 {
+                continue;
             }
-        })
-        .collect::<Vec<String>>())
+
+            // found marker
+            if trimmed_line.starts_with("---") {
+                // previous novel list had fulfilled
+                if output.len() > 0 {
+                    let nn = trimmed_line.replace("---", "").trim().to_string();
+                    if nn.len() > 0 {
+                        novel_name = nn;
+                    }
+                    break;
+                } else {
+                    // start a new novel list
+                    continue;
+                }
+            }
+
+            if trimmed_line.starts_with("http") {
+                output.push(trimmed_line.to_string());
+            }
+        }
+
+        if output.len() > 0 {
+            // append novel name to the last of array, then we pop it to use.
+            output.push(novel_name);
+            Ok(Some(output))
+        } else {
+            Ok(None)
+        }
+    }
 }
 
 #[tokio::main]
@@ -94,7 +142,13 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let builder = reqwest::Client::builder();
-    let header = HeaderMap::new();
+    let mut header = HeaderMap::new();
+    header.append(
+        "User-Agent",
+        reqwest::header::HeaderValue::from_static(
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:103.0) Gecko/20100101 Firefox/103.0",
+        ),
+    );
     let client = builder
         .default_headers(header)
         .proxy(reqwest::Proxy::http("http://127.0.0.1:7890")?)
@@ -104,13 +158,25 @@ async fn main() -> anyhow::Result<()> {
     let client = Arc::new(client);
 
     // initialize over, let's start download now.
-    let list = dest_novel_list().await?;
-    for novel_url in list {
-        log::info!("handling: {}", novel_url);
-        let novel_content = get_novel(&client, &novel_url).await?;
+    let file = tokio::fs::File::open("./novel_list.txt").await?;
+    let mut reader = NovelReader::new(file);
 
-        novel_content.dump_to_file().await?;
+    while let Some(mut novel_list) = reader.next_novel().await? {
+        let novel_name = novel_list
+            .pop()
+            .ok_or(anyhow::anyhow!("invalid novel name"))?;
+
+        let mut novel_file = tokio::fs::File::create(format!("./{}.txt", novel_name)).await?;
+
+        for novel_url in novel_list {
+            log::info!("handling: {}", novel_url);
+            let novel_content = get_novel(&client, &novel_url).await?;
+
+            novel_file.write_all("\n\n".as_bytes()).await?;
+            novel_content.dump_to_file(&mut novel_file).await?;
+        }
     }
 
+    log::info!("all done");
     Ok(())
 }
