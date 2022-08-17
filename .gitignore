@@ -1,3 +1,5 @@
 /target
 *.txt
 /backup
+
+.DS_Store
