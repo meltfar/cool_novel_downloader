@@ -102,7 +102,7 @@ impl UrlDriller {
                     .send()
                     .await?;
                 let content = resp.text_with_charset("utf-8").await?;
-                content.replace("<br>", "<br> MMirrorDrillerERT")
+                content.replace("<br />", "<br /> <p>MMirrorDrillerERT</p>")
             }
             UrlDriller::UnknownDriller => {
                 return Err(anyhow::anyhow!("unknown url"));
