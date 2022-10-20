@@ -73,7 +73,7 @@ fn parse_content_multi(data: String, sel: &str) -> anyhow::Result<String> {
     let mut output = String::new();
 
     for sh in selected_html {
-        // TODO: how to convert br to newline ?
+        // how to convert br to newline ?
         let pre_text = sh.as_node().text_contents();
         output.push_str(&pre_text);
         output.push('\n');

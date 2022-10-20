@@ -13,3 +13,4 @@ reqwest = "*"
 chrono = "*"
 kuchiki = "*"
 async-trait = "*"
+clap = { version = "*", features = ["cargo"] }

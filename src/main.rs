@@ -1,6 +1,7 @@
-use std::{io::Write, sync::Arc};
+use std::{io::Write, path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
+use clap::{arg, command, value_parser};
 use reqwest::header::HeaderMap;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 
@@ -171,6 +172,16 @@ async fn handle_one_novel(
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    let matchs = command!()
+        .arg(
+            arg!(-n --novel_list <FILE> "set the path of novel list")
+                .required(true)
+                .value_parser(value_parser!(PathBuf)),
+        )
+        .get_matches();
+
+    let novel_path = matchs.get_one::<PathBuf>("novel_list").ok_or(anyhow::anyhow!("no novel list sepeficied"))?;
+
     env_logger::Builder::new()
         .format(|buf, record| {
             writeln!(
@@ -203,7 +214,7 @@ async fn main() -> anyhow::Result<()> {
     let client = Arc::new(client);
 
     // initialize over, let's start download now.
-    let file = tokio::fs::File::open("./novel_list.txt").await?;
+    let file = tokio::fs::File::open(novel_path).await?;
     let mut reader = NovelReader::new(file);
 
     let semaphone = Arc::new(tokio::sync::Semaphore::new(3));
