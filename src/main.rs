@@ -180,7 +180,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .get_matches();
 
-    let novel_path = matchs.get_one::<PathBuf>("novel_list").ok_or(anyhow::anyhow!("no novel list sepeficied"))?;
+    let novel_path = matchs.get_one::<PathBuf>("novel_list").ok_or(anyhow::anyhow!("no novel list specified"))?;
 
     env_logger::Builder::new()
         .format(|buf, record| {
