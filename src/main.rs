@@ -92,7 +92,7 @@ impl NovelReader {
             .to_string();
 
         while let Some(line) = reader.next_line().await? {
-            let trimmed_line = line.trim();
+            let mut trimmed_line = line.trim();
             // ignore empty lines and comments
             if trimmed_line.starts_with("//") || trimmed_line.len() <= 0 {
                 continue;
@@ -111,6 +111,14 @@ impl NovelReader {
                     // start a new novel list
                     continue;
                 }
+            }
+
+            // ignore comments after //
+            if trimmed_line.contains(" //") {
+                trimmed_line = match trimmed_line.split(" //").next() {
+                    Some(s) => s.trim(),
+                    None => continue,
+                };
             }
 
             if trimmed_line.starts_with("http") || trimmed_line.starts_with("file://") {
@@ -180,7 +188,7 @@ async fn main() -> anyhow::Result<()> {
         )
         .get_matches();
 
-    let novel_path = matchs.get_one::<PathBuf>("novel_list").ok_or(anyhow::anyhow!("no novel list specified"))?;
+    let novel_path = matchs.get_one::<PathBuf>("novel_list").expect("no novel list specified");
 
     env_logger::Builder::new()
         .format(|buf, record| {
