@@ -1,6 +1,6 @@
-# 用于获取禁忌书屋的小说的工具
-### 待完善功能
-1. 多种小说源，包括从文件读取，此举可以用于合并、更新小说
-2. 支持暂时维护（在Marker之后，或中间的内容忽略掉）
-3. 支持多种网页源头，比如Pixiv、s80m等等
-4. 封装命令行，编译后运行
+# A utility to download novel from cool_novel 
+### TBD
+1. support multi sources, can be used to combine multi text files.
+2. jump over TBD header
+3. support pixiv
+4. provide command line arguments
